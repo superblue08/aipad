@@ -213,18 +213,22 @@
     for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
     return u;
   }
+  // MQTT.js 4.3.7 的 SRI 雜湊：檔案內容只要被改過一個 byte，瀏覽器就拒絕執行，
+  // 防止 CDN 被入侵後注入程式偷讀網址裡的金鑰。優先用同 repo 的副本，CDN 只當備援。
+  var MQTT_SRI = "sha384-ZFaJg22VvVm4+3ZqY9eRIHGmqdEQb+c7XO+0IKspqdtPGFu6xRiPnK8xeNA//kQJ";
   function loadScript(urls, done) {
     var s = document.createElement("script"); s.src = urls[0];
+    s.integrity = MQTT_SRI; s.crossOrigin = "anonymous";
     s.onload = done;
-    s.onerror = function () { if (urls.length > 1) loadScript(urls.slice(1), done); else setConn(false, "載入 MQTT 失敗"); };
+    s.onerror = function () { if (urls.length > 1) loadScript(urls.slice(1), done); else setConn(false, "載入 MQTT 失敗（或檔案被竄改）"); };
     document.head.appendChild(s);
   }
   function connectCloud() {
     if (!(window.crypto && crypto.subtle)) { setConn(false, "需要 HTTPS 網址才能解密"); return; }
     setConn(false, "連線雲端中…");
     crypto.subtle.importKey("raw", b64bytes(cloud.k), { name: "AES-GCM" }, false, ["decrypt"]).then(function (key) {
-      loadScript(["https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js",
-                  "https://cdn.jsdelivr.net/npm/mqtt@4.3.8/dist/mqtt.min.js"], function () {
+      loadScript(["mqtt.min.js",
+                  "https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"], function () {
         var c = mqtt.connect(cloud.w || "wss://broker.hivemq.com:8884/mqtt",
           { clientId: "aipad-ipad-" + Math.random().toString(16).slice(2, 10), reconnectPeriod: 5000, keepalive: 30 });
         c.on("connect", function () { c.subscribe(cloud.t); setConn(true, "雲端"); });
