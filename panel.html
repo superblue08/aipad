@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Claude 狀態">
+<meta name="theme-color" content="#0d0f12">
+<title>Claude 狀態</title>
+<style>
+  :root {
+    --bg: #0d0f12; --card: #171a1f; --card2: #1e2228; --line: #2a2f37;
+    --fg: #e8eaed; --dim: #8b929c; --ok: #4fc38a; --warn: #f0b429; --bad: #ef5350;
+    --accent: #d97757;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "SF Pro Text", "PingFang TC", "Noto Sans TC", sans-serif;
+    -webkit-font-smoothing: antialiased; -webkit-user-select: none; user-select: none; }
+  body { padding: 16px; } /* 舊 iOS 不認得 max()/env() 時的備援 */
+  body { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right))
+                  max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  /* 不用 flex gap（Safari 14.1 以前不支援），改用 margin */
+  .wrap { max-width: 1400px; margin: 0 auto; }
+  .wrap > * + * { margin-top: 16px; }
+  header > * + * { margin-left: 12px; }
+
+  header { display: flex; align-items: center; }
+  header .title { font-size: 22px; font-weight: 600; letter-spacing: .3px; }
+  header .title b { color: var(--accent); }
+  header .sp { flex: 1; }
+  header .clock { font-size: 34px; font-weight: 300; font-variant-numeric: tabular-nums; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .conn { font-size: 13px; color: var(--dim); }
+
+  /* 舊 iOS（<10.3）沒有 grid：先用 flex 排，支援 grid 的再覆蓋 */
+  .gauges, .sessions { display: flex; flex-wrap: wrap; }
+  .gauges > div, .sessions > div { flex: 1 1 300px; margin: 0 16px 16px 0; }
+  @supports (display: grid) { .gauges > div, .sessions > div { margin: 0; } }
+  .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .g { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; }
+  .g .lbl { font-size: 15px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px; }
+  .g .pct { font-size: 64px; font-weight: 600; line-height: 1.05; margin: 6px 0 10px;
+            font-variant-numeric: tabular-nums; }
+  .g .pct small { font-size: 28px; font-weight: 400; color: var(--dim); margin-left: 2px; }
+  .bar { height: 12px; background: var(--card2); border-radius: 6px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; border-radius: 6px; background: var(--ok);
+           transition: width .6s ease, background-color .6s; }
+  .g .note { margin-top: 10px; font-size: 15px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .g .note b { color: var(--fg); font-weight: 500; }
+
+  h2 { margin: 4px 2px 0; font-size: 15px; font-weight: 500; color: var(--dim);
+       text-transform: uppercase; letter-spacing: 1px; }
+  .sessions { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px; }
+  .s { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px 20px;
+       display: flex; flex-direction: column; gap: 10px; opacity: .72; }
+  .s.live { opacity: 1; border-color: var(--accent); }
+  .s .top { display: flex; align-items: baseline; gap: 10px; }
+  .s .name { font-size: 20px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .s .age { font-size: 13px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .s .meta { font-size: 14px; color: var(--dim); display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  .s .meta b { color: var(--fg); font-weight: 500; }
+  .s .ctxrow { display: flex; align-items: center; gap: 12px; }
+  .s .ctxrow .bar { flex: 1; }
+  .s .ctxrow span { font-size: 26px; font-weight: 600; min-width: 70px; text-align: right; font-variant-numeric: tabular-nums; }
+  .s .cwd { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .empty { color: var(--dim); font-size: 16px; padding: 30px; text-align: center;
+           border: 1px dashed var(--line); border-radius: 18px; }
+  footer { margin-top: 24px; font-size: 12px; color: var(--dim); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="dot" id="dot"></div>
+    <div class="title"><b>Claude</b> Code</div>
+    <div class="conn" id="conn">連線中…</div>
+    <div class="sp"></div>
+    <div class="clock" id="clock">--:--</div>
+  </header>
+
+  <div class="gauges" id="gauges"></div>
+
+  <h2>Sessions</h2>
+  <div class="sessions" id="sessions"><div class="empty">等待 Claude Code 狀態列送資料…</div></div>
+
+  <footer id="foot">點一下畫面可嘗試保持螢幕常亮</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var state = null, serverSkew = 0;
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function num(v) { v = parseFloat(v); return isFinite(v) ? v : null; }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function color(p) { return p >= 90 ? "var(--bad)" : p >= 70 ? "var(--warn)" : "var(--ok)"; }
+  function now() { return Date.now() / 1000 + serverSkew; }
+
+  // resets_at 可能是 epoch 秒，也可能是 ISO 字串
+  function toEpoch(v) {
+    if (v == null || v === "" || v === 0) return null;
+    var n = num(v);
+    if (n !== null && /^[\d.]+$/.test(String(v))) return n > 1e12 ? n / 1000 : n;
+    var t = Date.parse(v); return isNaN(t) ? null : t / 1000;
+  }
+  function hhmm(ep) {
+    var d = new Date(ep * 1000), t = new Date();
+    var s = pad(d.getHours()) + ":" + pad(d.getMinutes());
+    return d.toDateString() === t.toDateString() ? s : (d.getMonth() + 1) + "/" + d.getDate() + " " + s;
+  }
+  function dur(sec) {
+    sec = Math.max(0, Math.round(sec));
+    var d = Math.floor(sec / 86400), h = Math.floor(sec % 86400 / 3600), m = Math.floor(sec % 3600 / 60);
+    if (d) return d + "天 " + h + "時";
+    if (h) return h + "時 " + m + "分";
+    if (m) return m + "分";
+    return sec + "秒";
+  }
+  function tok(n) { n = num(n); if (n === null) return "?";
+    if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\.0$/, "") + "M";
+    if (n >= 1e3) return Math.round(n / 1e3) + "k"; return String(Math.round(n)); }
+
+  function sortedSessions() {
+    if (!state) return [];
+    var arr = [], k;
+    for (k in state.sessions) if (state.sessions.hasOwnProperty(k)) arr.push(state.sessions[k]);
+    arr.sort(function (a, b) { return (b._ts || 0) - (a._ts || 0); });
+    return arr;
+  }
+
+  function gauge(label, pct, resetEp) {
+    var p = num(pct), note;
+    if (resetEp) {
+      var left = resetEp - now();
+      note = left > 0 ? "reset <b>" + hhmm(resetEp) + "</b> · 還有 " + dur(left) : "已重置";
+    } else note = "&nbsp;";
+    return '<div class="g"><div class="lbl">' + esc(label) + '</div>' +
+      '<div class="pct">' + (p === null ? "--" : Math.round(p)) + '<small>%</small></div>' +
+      '<div class="bar"><i style="width:' + Math.min(100, p || 0) + '%;background:' + color(p || 0) + '"></i></div>' +
+      '<div class="note">' + note + '</div></div>';
+  }
+
+  function render() {
+    var list = sortedSessions();
+    if (!list.length) return;
+    var a = list[0]; // 帳號層用量取最新一筆
+    var g = gauge("5 小時", a.rate_5h_pct, toEpoch(a.rate_5h_resets_at)) +
+            gauge("7 天", a.rate_7d_pct, toEpoch(a.rate_7d_resets_at));
+    if (a.scoped_pct != null && a.scoped_pct !== "")
+      g += gauge((a.scoped_label || "Model") + " 每週", a.scoped_pct, toEpoch(a.scoped_resets_at));
+    $("gauges").innerHTML = g;
+
+    var html = "", t = now();
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i], age = t - (s._ts || 0), live = age < 120;
+      var cwd = s.cwd || "", folder = cwd.split(/[\\\/]/).filter(Boolean).pop() || "";
+      var name = s.session_name || folder || String(s.session_id || "").slice(0, 8);
+      var ctx = num(s.context_used_pct) || 0;
+      var mins = num(s.total_duration_ms) ? Math.round(s.total_duration_ms / 60000) : null;
+      html += '<div class="s' + (live ? " live" : "") + '">' +
+        '<div class="top"><div class="name">' + esc(name) + '</div>' +
+        '<div class="age">' + (age < 5 ? "剛剛" : dur(age) + "前") + '</div></div>' +
+        '<div class="ctxrow"><div class="bar"><i style="width:' + Math.min(100, ctx) + '%;background:' + color(ctx) +
+        '"></i></div><span>' + Math.round(ctx) + '%</span></div>' +
+        '<div class="meta"><span><b>' + esc(s.model || "?") + '</b></span>' +
+        '<span>ctx <b>' + tok(s.total_input_tokens) + (s.context_window_size ? " / " + tok(s.context_window_size) : "") + '</b></span>' +
+        '<span><b>$' + (num(s.total_cost_usd) || 0).toFixed(2) + '</b></span>' +
+        (mins !== null ? '<span><b>' + mins + '</b> 分鐘</span>' : "") +
+        (s.effort ? '<span>effort <b>' + esc(s.effort) + '</b></span>' : "") + '</div>' +
+        (cwd ? '<div class="cwd">' + esc(cwd) + '</div>' : "") + '</div>';
+    }
+    $("sessions").innerHTML = html;
+  }
+
+  function setConn(ok, text) { $("dot").className = "dot" + (ok ? " on" : ""); $("conn").textContent = text; }
+  function apply(d) {
+    serverSkew = (d.server_time || Date.now() / 1000) - Date.now() / 1000;
+    state = d; render();
+  }
+
+  // SSE 為主，不支援或斷線時改用輪詢
+  var es = null, pollTimer = null;
+  function poll() {
+    var x = new XMLHttpRequest();
+    x.open("GET", "/api/state?_=" + Date.now());
+    x.timeout = 5000;
+    x.onload = function () { try { apply(JSON.parse(x.responseText)); setConn(true, "輪詢中"); } catch (e) {} };
+    x.onerror = x.ontimeout = function () { setConn(false, "連不到電腦"); };
+    x.send();
+  }
+  // ---- 雲端模式：網址 #t=<topic>&k=<key>&w=<wss broker>，從 MQTT 讀加密資料 ----
+  function hashParams() {
+    var o = {}, h = location.hash.replace(/^#/, "").split("&");
+    for (var i = 0; i < h.length; i++) {
+      var p = h[i].split("="); if (p[0]) o[p[0]] = decodeURIComponent(p.slice(1).join("="));
+    }
+    return o;
+  }
+  var cloud = hashParams();
+  var cloudMode = !!(cloud.t && cloud.k);
+  var lastPub = 0;
+
+  function b64bytes(s) {
+    s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "=";
+    var bin = atob(s), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+  function loadScript(urls, done) {
+    var s = document.createElement("script"); s.src = urls[0];
+    s.onload = done;
+    s.onerror = function () { if (urls.length > 1) loadScript(urls.slice(1), done); else setConn(false, "載入 MQTT 失敗"); };
+    document.head.appendChild(s);
+  }
+  function connectCloud() {
+    if (!(window.crypto && crypto.subtle)) { setConn(false, "需要 HTTPS 網址才能解密"); return; }
+    setConn(false, "連線雲端中…");
+    crypto.subtle.importKey("raw", b64bytes(cloud.k), { name: "AES-GCM" }, false, ["decrypt"]).then(function (key) {
+      loadScript(["https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js",
+                  "https://cdn.jsdelivr.net/npm/mqtt@4.3.8/dist/mqtt.min.js"], function () {
+        var c = mqtt.connect(cloud.w || "wss://broker.hivemq.com:8884/mqtt",
+          { clientId: "aipad-ipad-" + Math.random().toString(16).slice(2, 10), reconnectPeriod: 5000, keepalive: 30 });
+        c.on("connect", function () { c.subscribe(cloud.t); setConn(true, "雲端"); });
+        c.on("reconnect", function () { setConn(false, "重新連線中…"); });
+        c.on("offline", function () { setConn(false, "雲端離線"); });
+        c.on("message", function (topic, msg) {
+          var raw = b64bytes(String.fromCharCode.apply(null, new Uint8Array(msg)));
+          crypto.subtle.decrypt({ name: "AES-GCM", iv: raw.slice(0, 12) }, key, raw.slice(12)).then(function (pt) {
+            var d = JSON.parse(new TextDecoder().decode(pt));
+            lastPub = d.server_time || 0;
+            d.server_time = Date.now() / 1000; // 雲端資料可能是舊的 retained 訊息，時間以 iPad 為準
+            apply(d);
+          }).catch(function () { setConn(false, "解密失敗：金鑰不符"); });
+        });
+      });
+    });
+  }
+  // 電腦超過 3 分鐘沒送資料（關機、server 沒跑）就提示
+  setInterval(function () {
+    if (cloudMode && lastPub && Date.now() / 1000 - lastPub > 180)
+      $("conn").textContent = "電腦離線（資料停在 " + hhmm(lastPub) + "）";
+  }, 5000);
+
+  function connect() {
+    if (cloudMode) { connectCloud(); return; }
+    if (!window.EventSource) { poll(); pollTimer = setInterval(poll, 3000); return; }
+    es = new EventSource("/events");
+    es.onopen = function () { setConn(true, "即時"); };
+    es.onmessage = function (e) { try { apply(JSON.parse(e.data)); } catch (err) {} };
+    es.onerror = function () { setConn(false, "重新連線中…"); }; // EventSource 會自動重連
+  }
+  connect();
+  // iPad 從背景回來時立刻補一次資料
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && !cloudMode) poll(); });
+
+  // 時鐘與倒數每秒更新
+  setInterval(function () {
+    var d = new Date(); $("clock").textContent = pad(d.getHours()) + ":" + pad(d.getMinutes());
+    render();
+  }, 1000);
+
+  // 螢幕常亮（iPadOS 16.4+ 支援 Wake Lock；不支援就請到設定把自動鎖定改「永不」）
+  var lock = null;
+  function wake() {
+    if (!("wakeLock" in navigator)) { $("foot").textContent = "此 iPad 不支援網頁常亮：請到 設定 → 螢幕顯示與亮度 → 自動鎖定 → 永不"; return; }
+    navigator.wakeLock.request("screen").then(function (l) {
+      lock = l; $("foot").textContent = "螢幕常亮已開啟";
+      l.addEventListener("release", function () { $("foot").textContent = "點一下畫面可保持螢幕常亮"; });
+    }).catch(function () {});
+  }
+  document.addEventListener("click", function () { if (!lock || lock.released) wake(); });
+  document.addEventListener("visibilitychange", function () { if (!document.hidden && lock && lock.released) wake(); });
+})();
+</script>
+</body>
+</html>
